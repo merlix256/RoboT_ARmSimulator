@@ -1,0 +1,238 @@
+# Robot Arm Visualizer - User Guide
+
+## Table of Contents
+1. [Getting Started](#getting-started)
+2. [Basic Controls](#basic-controls)
+3. [Core Functions](#core-functions)
+4. [Advanced Usage](#advanced-usage)
+5. [Examples](#examples)
+6. [Tips and Best Practices](#tips-and-best-practices)
+
+## Getting Started
+
+### Installation
+```python
+from robot_arm_visualizer import RobotArmVisualizer
+
+# Create a robot arm with 4 joints
+joint_lengths = [120, 100, 80, 60]  # Length of each segment in pixels
+visualizer = RobotArmVisualizer(joint_lengths)
+```
+
+The numbers in `joint_lengths` determine the length of each arm segment from base to tip. Larger numbers create longer segments.
+
+### Basic Structure
+The robot arm consists of:
+- Base (fixed point)
+- Joints (rotatable connections)
+- Segments (rigid links between joints)
+- End effector (the tip of the arm)
+
+## Basic Controls
+
+### Keyboard Controls
+- `T`: Toggle trail visualization
+- `W`: Toggle workspace boundary
+- `G`: Toggle coordinate grid
+- `ESC`: Quit the application
+
+### Mouse Controls
+- Click on any joint to display its detailed information
+- Information shown includes:
+  - Joint angle
+  - Segment length
+  - Position
+  - Torque limits
+  - Angle limits
+
+## Core Functions
+
+### 1. Updating Joint Angles
+```python
+visualizer.update_angles([angle1, angle2, angle3, angle4])
+```
+- Takes a list of angles in degrees
+- Must match number of joints
+- Angles are clipped to joint limits (-180° to 180°)
+- Updates immediately
+
+### 2. Getting Joint Positions
+```python
+positions = visualizer.get_joint_positions()
+```
+- Returns list of (x, y) coordinates for each joint
+- First position is base, last is end effector
+- Useful for tracking arm configuration
+
+### 3. Getting End Effector Position
+```python
+end_pos = visualizer.get_end_effector_position()
+```
+- Returns (x, y) coordinates of the end effector
+- Useful for task-space control
+
+### 4. Getting Joint States
+```python
+states = visualizer.get_joint_states()
+```
+- Returns detailed information about each joint
+- Includes angles, lengths, limits, and torque specs
+- Useful for monitoring and control
+
+### 5. Main Update Loop
+```python
+while visualizer.update():
+    # Your control code here
+    pass
+```
+- Must be called continuously to keep visualization running
+- Returns False when window is closed or ESC pressed
+
+## Advanced Usage
+
+### 1. Creating Simple Animations
+```python
+import math
+
+angle = 0
+while visualizer.update():
+    angles = [
+        45 * math.sin(angle),      # Oscillating motion
+        30,                        # Fixed angle
+        -30 * math.cos(angle),     # Opposite oscillation
+        0                          # Fixed angle
+    ]
+    visualizer.update_angles(angles)
+    angle += 0.02  # Controls speed
+```
+
+### 2. Position-Based Movement
+```python
+while visualizer.update():
+    positions = visualizer.get_joint_positions()
+    end_pos = positions[-1]  # End effector position
+    
+    # Example: Move based on end effector position
+    if end_pos[0] < target_x:
+        angles = [current_angles[0] + 1, *current_angles[1:]]
+        visualizer.update_angles(angles)
+```
+
+### 3. Sequential Movements
+```python
+def execute_sequence():
+    moves = [
+        [0, 0, 0, 0],      # Home position
+        [45, 30, 0, 0],    # Position 1
+        [-45, 30, -30, 0], # Position 2
+    ]
+    
+    for angles in moves:
+        visualizer.update_angles(angles)
+        # Add delay or wait for completion
+        time.sleep(1)
+```
+
+## Examples
+
+### 1. Simple Pendulum Motion
+```python
+import math
+
+while visualizer.update():
+    angle = math.sin(time.time()) * 45  # Swings ±45 degrees
+    visualizer.update_angles([angle, 0, 0, 0])
+```
+
+### 2. Wave Motion
+```python
+while visualizer.update():
+    t = time.time()
+    angles = [
+        20 * math.sin(t),       # Base
+        60 * math.sin(t * 2),   # Shoulder
+        40 * math.sin(t * 3),   # Elbow
+        30 * math.sin(t * 4)    # Wrist
+    ]
+    visualizer.update_angles(angles)
+```
+
+### 3. Drawing Shapes
+```python
+def draw_circle(radius=100, speed=0.02):
+    t = 0
+    while visualizer.update():
+        # Calculate target point on circle
+        x = radius * math.cos(t)
+        y = radius * math.sin(t)
+        
+        # Convert to joint angles (simplified)
+        base_angle = math.atan2(y, x)
+        visualizer.update_angles([
+            math.degrees(base_angle),
+            30,  # Fixed angles for other joints
+            -30,
+            0
+        ])
+        t += speed
+```
+
+## Tips and Best Practices
+
+1. **Angle Management**
+   - Keep track of current angles
+   - Use gradual changes for smooth motion
+   - Consider joint limits in planning
+
+2. **Position Control**
+   - Use `get_joint_positions()` for feedback
+   - Plan movements in small increments
+   - Verify end effector position
+
+3. **Performance**
+   - Update angles efficiently
+   - Avoid unnecessary calculations in main loop
+   - Use appropriate delays for controlled movement
+
+4. **Visualization Features**
+   - Use trail for motion planning
+   - Grid for spatial reference
+   - Workspace visualization for reach planning
+
+5. **Error Handling**
+   - Check angle limits before updating
+   - Verify number of angles matches joints
+   - Monitor end effector position
+
+## Common Tasks and Solutions
+
+### Task: Moving to a Specific Point
+```python
+def move_to_point(target_x, target_y, steps=100):
+    start_pos = visualizer.get_end_effector_position()
+    
+    for i in range(steps):
+        t = i / steps
+        current_x = start_pos[0] + (target_x - start_pos[0]) * t
+        current_y = start_pos[1] + (target_y - start_pos[1]) * t
+        
+        # Implement inverse kinematics here
+        # This is a simplified example
+        angles = calculate_angles(current_x, current_y)
+        visualizer.update_angles(angles)
+        
+        if not visualizer.update():
+            break
+```
+
+### Task: Maintaining a Pose
+```python
+def hold_pose(target_angles, duration=5):
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        if not visualizer.update():
+            break
+        visualizer.update_angles(target_angles)
+```
+
+Remember that the robot arm operates in a 2D space and all movements are constrained to this plane. Understanding the relationship between joint angles and end effector position is key to effective control.

@@ -1,85 +1,84 @@
 # robot_controller.py
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
-import math
-import numpy as np
+from std_msgs.msg import String, Float32MultiArray
+from inverse_kinematics import InverseKinematics3D, interpolate_angles
+from robot_arm_visualize_with_metric import RobotArmVisualizer
+import time
 
 class RobotArmController(Node):
     def __init__(self):
         super().__init__('robot_arm_controller')
         
-        # Create subscribers and publishers
-        self.pos_subscription = self.create_subscription(
+        # Subscribe to target positions
+        self.subscription = self.create_subscription(
             String,
             'target_position',
-            self.position_callback,
+            self.target_callback,
+            10)
+        
+        # Publisher for sending angles to Arduino bridge
+        self.angles_publisher = self.create_publisher(
+            Float32MultiArray,
+            'target_angles',
             10
         )
-        self.angle_publisher = self.create_publisher(
-            String,
-            'joint_angles',
-            10
+        
+        # Initialize robot arm components
+        self.joint_lengths = [0.1, 0.08, 0.05]
+        self.visualizer = RobotArmVisualizer(
+            joint_lengths=self.joint_lengths,
+            pixels_per_meter=1000,
+            grid_size_meters=0.1,
         )
+        self.ik_solver = InverseKinematics3D(self.joint_lengths)
+        self.current_angles = [0, 0, 0]
+        self.step_size = 2  # Degrees per update
+        self.target_angles = None
         
-        # Robot parameters
-        self.L1 = 0.1  # Length of first link
-        self.L2 = 0.08  # Length of second link
-        self.L3 = 0.05  # Length of third link
+        # Create a timer for visualization updates
+        self.create_timer(0.005, self.update_visualization)
         
-        # Current state
-        self.current_angles = [90, 90, 90]  # Starting angles
-        
-    def calculate_inverse_kinematics(self, x, y):
+        self.get_logger().info('Robot Arm Controller Node Started')
+
+    def target_callback(self, msg):
         try:
-            # Calculate distance to target
-            target_distance = math.sqrt(x*x + y*y)
-            
-            # Check if point is reachable
-            if target_distance > (self.L1 + self.L2 + self.L3):
-                raise ValueError("Target position out of reach")
-                
-            # Calculate first joint angle (base rotation)
-            theta1 = math.atan2(y, x)
-            
-            # Calculate second joint angle
-            d = math.sqrt(x*x + y*y) - self.L3  # Adjust for third link
-            cos_theta2 = (d*d - self.L1*self.L1 - self.L2*self.L2) / (2*self.L1*self.L2)
-            cos_theta2 = min(1, max(-1, cos_theta2))  # Clamp to valid range
-            theta2 = math.acos(cos_theta2)
-            
-            # Calculate third joint angle
-            theta3 = math.atan2(y, x) - theta1 - theta2
-            
-            # Convert to degrees
-            angles = [
-                math.degrees(theta1),
-                math.degrees(theta2),
-                math.degrees(theta3)
-            ]
-            
-            return angles
-            
-        except Exception as e:
-            self.get_logger().error(f'Inverse kinematics error: {e}')
-            return None
-        
-    def position_callback(self, msg):
-        try:
-            # Parse target position
+            # Parse target position from message
             x, y = map(float, msg.data.split())
+            target_position = (x, y)
             
-            # Calculate joint angles
-            angles = self.calculate_inverse_kinematics(x, y)
+            # Calculate new target angles
+            self.target_angles = self.ik_solver.calculate(target_position)
+            self.get_logger().info(f'New target received: {target_position}')
+            self.get_logger().info(f'Target angles: {self.target_angles}')
             
-            if angles:
-                # Publish joint angles
-                msg = String()
-                msg.data = f"{angles[0]:.1f} {angles[1]:.1f} {angles[2]:.1f}"
-                self.angle_publisher.publish(msg)
-                
-        except Exception as e:
-            self.get_logger().error(f'Error processing position: {e}')
+        except ValueError as e:
+            self.get_logger().error(f'Error processing target position: {e}')
+
+    def update_visualization(self):
+        if self.target_angles is None:
+            return
+            
+        if self.visualizer.update():
+            # Interpolate angles for smoother motion
+            self.current_angles = interpolate_angles(
+                self.current_angles, 
+                self.target_angles, 
+                step=self.step_size
+            )
+
+            # Update the visualizer with the interpolated angles
+            self.visualizer.update_angles(self.current_angles)
+
+            # Publish angles to Arduino bridge
+            msg = Float32MultiArray()
+            msg.data = self.current_angles
+            self.angles_publisher.publish(msg)
+
+            # Get and display current end-effector position
+            e_pos = self.visualizer.get_end_effector_position()
+            self.get_logger().debug(f'Current End-Effector Position: {e_pos}')
+            self.get_logger().debug(f'Current angles: {self.current_angles}')
 
 def main(args=None):
     rclpy.init(args=args)
@@ -89,7 +88,7 @@ def main(args=None):
         rclpy.spin(controller)
     except KeyboardInterrupt:
         pass
-    
+        
     controller.destroy_node()
     rclpy.shutdown()
 

@@ -1,4 +1,4 @@
-from robot_arm_visualize_with_metric import RobotArmVisualizer
+from robot_arm_visualizer import RobotArmVisualizer
 import math
 
 joint_lengths = [120, 100, 80, 60]

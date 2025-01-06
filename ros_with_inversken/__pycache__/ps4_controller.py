@@ -4,6 +4,8 @@ from rclpy.node import Node
 from std_msgs.msg import String
 import pygame
 import math
+from collections import deque
+import numpy as np
 
 class PS4ControllerNode(Node):
     def __init__(self):
@@ -24,41 +26,67 @@ class PS4ControllerNode(Node):
         self.joystick = pygame.joystick.Joystick(0)
         self.joystick.init()
         
-        # Verify it's a PS4 controller
-        controller_name = self.joystick.get_name()
-        self.get_logger().info(f'Connected to controller: {controller_name}')
-        
         # Configuration
-        self.max_reach = 0.15  # Maximum reach of the robot arm in meters
-        self.dead_zone = 0.1   # Joystick dead zone to prevent drift
+        self.max_reach = 0.15      # Maximum reach of the robot arm in meters
+        self.dead_zone = 0.15      # Increased dead zone for better control
+        self.sensitivity = 0.6     # Reduced sensitivity for finer control
+        self.smoothing_window = 5  # Number of samples for moving average
+        
+        # Initialize position tracking
+        self.current_x = 0.0
+        self.current_y = 0.0
+        
+        # Buffers for smoothing
+        self.x_buffer = deque([0.0] * self.smoothing_window, maxlen=self.smoothing_window)
+        self.y_buffer = deque([0.0] * self.smoothing_window, maxlen=self.smoothing_window)
         
         # Create timer for reading controller input
         self.create_timer(0.02, self.read_controller)  # 50Hz update rate
         
         self.get_logger().info('PS4 Controller Node Started')
-        
+    
+    def smooth_input(self, value, buffer):
+        """Apply exponential smoothing to input"""
+        buffer.append(value)
+        return sum(buffer) / len(buffer)
+    
+    def apply_non_linear_scaling(self, value):
+        """Apply non-linear scaling for better control at low speeds"""
+        return math.copysign(abs(value) ** 1.5, value)
+    
     def read_controller(self):
-        pygame.event.pump()  # Process pygame events
+        pygame.event.pump()
         
-        # Read left stick values (-1 to 1)
-        x = self.joystick.get_axis(0)  # Left/Right on left stick
-        y = -self.joystick.get_axis(1)  # Up/Down on left stick (inverted)
+        # Read raw stick values
+        x = self.joystick.get_axis(0)
+        y = -self.joystick.get_axis(1)  # Invert Y axis
         
         # Apply dead zone
-        if abs(x) < self.dead_zone:
-            x = 0
-        if abs(y) < self.dead_zone:
-            y = 0
-            
-        # Convert joystick values to target position
-        # Scale the values to the robot's reach
+        x = 0.0 if abs(x) < self.dead_zone else x
+        y = 0.0 if abs(y) < self.dead_zone else y
+        
+        # Apply sensitivity and non-linear scaling
+        if x != 0:
+            x = self.apply_non_linear_scaling(x) * self.sensitivity
+        if y != 0:
+            y = self.apply_non_linear_scaling(y) * self.sensitivity
+        
+        # Smooth the input
+        x = self.smooth_input(x, self.x_buffer)
+        y = self.smooth_input(y, self.y_buffer)
+        
+        # Scale to robot arm reach
         target_x = x * self.max_reach
         target_y = y * self.max_reach
         
-        # Only publish if stick is out of dead zone
-        if abs(x) > self.dead_zone or abs(y) > self.dead_zone:
+        # Update current position with momentum
+        self.current_x = 0.8 * self.current_x + 0.2 * target_x  # 80% previous, 20% new
+        self.current_y = 0.8 * self.current_y + 0.2 * target_y
+        
+        # Only publish if there's significant movement
+        if abs(x) > 0.05 or abs(y) > 0.05:
             msg = String()
-            msg.data = f"{target_x:.3f} {target_y:.3f}"
+            msg.data = f"{self.current_x:.3f} {self.current_y:.3f}"
             self.publisher_.publish(msg)
             self.get_logger().debug(f'Published target position: {msg.data}')
 
@@ -71,7 +99,6 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        # Cleanup
         pygame.quit()
         controller_node.destroy_node()
         rclpy.shutdown()

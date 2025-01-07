@@ -1,90 +1,67 @@
 import cv2
 import numpy as np
-import pygame
 
-# Initialize Pygame
-pygame.init()
+# IP Camera URL (replace with your URL)
+camera_url = "http://192.168.129.35:8080/video"
 
-# Load the image using OpenCV
-image = cv2.imread('/home/merlix/Documents/GitHub/RoboT_ARmSimulator/complete/white_square.png')
+# Open the camera stream
+cap = cv2.VideoCapture(camera_url)
 
-# Resize the image for better visualization (optional)
-image = cv2.resize(image, (800, 600))
+# Minimum area threshold
+MIN_AREA = 300
 
-# Convert the image to grayscale
-gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+while True:
+    # Capture a frame
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to capture video. Exiting...")
+        break
 
-# Apply GaussianBlur to reduce noise
-blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Convert to grayscale
+    imgGrey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-# Use Canny edge detection
-edges = cv2.Canny(blurred, 50, 150)
+    # Apply adaptive thresholding
+    thresh = cv2.adaptiveThreshold(imgGrey, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
 
-# Find contours
-contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Find contours
+    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-# Detect squares
-squares = []
-for contour in contours:
-    # Approximate the contour to a polygon
-    epsilon = 0.04 * cv2.arcLength(contour, True)
-    approx = cv2.approxPolyDP(contour, epsilon, True)
+    # Iterate over contours
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > MIN_AREA:
+            # Approximate the contour
+            approx = cv2.approxPolyDP(contour, 0.01 * cv2.arcLength(contour, True), True)
+            
+            if len(approx) == 4:  # Detect squares/rectangles
+                x, y, w, h = cv2.boundingRect(approx)
+                aspectRatio = float(w) / h
 
-    # Check if the polygon has four vertices and is convex
-    if len(approx) == 4 and cv2.isContourConvex(approx):
-        # Calculate the bounding rectangle and aspect ratio
-        x, y, w, h = cv2.boundingRect(approx)
-        aspect_ratio = float(w) / h
+                # Calculate the center of the shape
+                center_x = x + w // 2
+                center_y = y + h // 2
 
-        # Consider it a square if the aspect ratio is roughly 1
-        if 0.9 <= aspect_ratio <= 1.1:
-            squares.append({
-                'points': approx.reshape(-1, 2).tolist(),  # Convert to list of tuples
-                'center': (x + w // 2, y + h // 2),  # Calculate center of the square
-                'area': w * h  # Calculate area for sorting
-            })
+                if 0.95 <= aspectRatio <= 1.05:  # Square
+                    shape = "Square"
+                else:  # Rectangle
+                    shape = "Rectangle"
 
-# Sort squares by area (largest first) and pick the largest one
-largest_square = None
-if squares:
-    squares = sorted(squares, key=lambda s: s['area'], reverse=True)
-    largest_square = squares[0]  # Use the largest square
+                # Draw the contour and label
+                cv2.drawContours(frame, [approx], 0, (0, 255, 0), 3)
+                cv2.putText(frame, f"{shape} Center: ({center_x}, {center_y})", 
+                            (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
 
-# Prepare the Pygame window
-window_width, window_height = image.shape[1], image.shape[0]
-screen = pygame.display.set_mode((window_width, window_height))
-pygame.display.set_caption("Square Detection")
+                # Debugging: Print the center coordinates
+                print(f"Detected {shape} with center coordinates: ({center_x}, {center_y})")
 
-# Convert the OpenCV image (BGR) to a Pygame-friendly format (RGB)
-image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-image_surface = pygame.surfarray.make_surface(np.rot90(image_rgb))
+    # Display the video feed
+    cv2.imshow("Live Shape Detection", frame)
 
-# Main loop
-running = True
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+    # Exit when 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-    # Clear the screen
-    screen.fill((0, 0, 0))
-
-    # Draw the image on the screen (first layer)
-    screen.blit(image_surface, (0, 0))
-
-    # Draw the largest detected square (if any)
-    if largest_square:
-        points = largest_square['points']
-        center = largest_square['center']
-
-        # Draw the square outline (green lines)
-        pygame.draw.polygon(screen, (0, 255, 0), points, 3)
-
-        # Draw the square center (red dot)
-        pygame.draw.circle(screen, (255, 0, 0), center, 5)
-
-    # Update the display (ensure highlights are drawn on top of the image)
-    pygame.display.flip()
-
-# Quit Pygame
-pygame.quit()
+# Release resources
+cap.release()
+cv2.destroyAllWindows()

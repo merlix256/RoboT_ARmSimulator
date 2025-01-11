@@ -8,7 +8,7 @@ import time
 
 class RobotArmController(Node):
     def __init__(self):
-        super().__init__('robot_arm_controller')
+        super().__init__('robot_arm_main_controller')
         
         # Subscribe to target positions
         self.subscription = self.create_subscription(

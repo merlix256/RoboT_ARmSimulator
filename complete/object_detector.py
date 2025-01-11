@@ -8,7 +8,11 @@ camera_url = "http://192.168.129.35:8080/video"
 cap = cv2.VideoCapture(camera_url)
 
 # Minimum area threshold
-MIN_AREA = 300
+MIN_AREA = 700
+
+# Desired width and height for the window
+window_width = 800
+window_height = 600
 
 while True:
     # Capture a frame
@@ -55,8 +59,11 @@ while True:
                 # Debugging: Print the center coordinates
                 print(f"Detected {shape} with center coordinates: ({center_x}, {center_y})")
 
+    # Resize the frame to the smaller window size
+    frame_resized = cv2.resize(frame, (window_width, window_height))
+
     # Display the video feed
-    cv2.imshow("Live Shape Detection", frame)
+    cv2.imshow("Live Shape Detection", frame_resized)
 
     # Exit when 'q' is pressed
     if cv2.waitKey(1) & 0xFF == ord('q'):
